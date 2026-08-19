@@ -122,7 +122,10 @@ Deno.serve(async (req: Request) => {
       }
 
       const requestOrigin = req.headers.get("origin") || "";
-      const configuredAppUrl = Deno.env.get("APP_URL") || Deno.env.get("PUBLIC_SITE_URL") || requestOrigin;
+      const isProductionOrigin = requestOrigin.startsWith("https://") && !requestOrigin.includes("localhost");
+      const configuredAppUrl = isProductionOrigin
+        ? requestOrigin
+        : Deno.env.get("APP_URL") || Deno.env.get("PUBLIC_SITE_URL") || requestOrigin;
       if (!configuredAppUrl) {
         return json({ error: "Production site URL is not configured. Set APP_URL or PUBLIC_SITE_URL in Supabase Edge Function secrets." }, 500);
       }
