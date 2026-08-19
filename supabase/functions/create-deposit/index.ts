@@ -121,7 +121,12 @@ Deno.serve(async (req: Request) => {
         return json({ error: "Failed to create Paystack deposit" }, 500);
       }
 
-      const appUrl = Deno.env.get("APP_URL") || "http://localhost:3000";
+      const requestOrigin = req.headers.get("origin") || "";
+      const configuredAppUrl = Deno.env.get("APP_URL") || Deno.env.get("PUBLIC_SITE_URL") || requestOrigin;
+      if (!configuredAppUrl) {
+        return json({ error: "Production site URL is not configured. Set APP_URL or PUBLIC_SITE_URL in Supabase Edge Function secrets." }, 500);
+      }
+      const appUrl = configuredAppUrl.replace(/\/$/, "");
       const paystackResponse = await fetch("https://api.paystack.co/transaction/initialize", {
         method: "POST",
         headers: {
