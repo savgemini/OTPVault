@@ -32,7 +32,7 @@ export default function AdminDepositsPage() {
       return;
     }
 
-    const userIds = [...new Set((rawDeposits ?? []).map((deposit) => deposit.user_id))];
+    const userIds = (rawDeposits ?? []).map((deposit) => deposit.user_id).filter((id, index, ids) => ids.indexOf(id) === index);
     const { data: profiles } = userIds.length
       ? await supabase.from('profiles').select('id, email, full_name').in('id', userIds)
       : { data: [] };
