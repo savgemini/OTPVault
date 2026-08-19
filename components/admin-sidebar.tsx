@@ -6,7 +6,7 @@ import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import {
   Smartphone, LayoutDashboard, Users, CreditCard, Server, Settings,
-  LogOut, Menu, Shield, ListOrdered, Globe, Receipt,
+  LogOut, Menu, Shield, ListOrdered, Globe, Receipt, ArrowLeft,
 } from 'lucide-react';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { useState } from 'react';
@@ -66,6 +66,11 @@ export function AdminSidebar() {
       </nav>
 
       <div className="border-t p-4">
+        <Button variant="outline" size="sm" className="mb-2 w-full justify-start" asChild>
+          <Link href="/dashboard">
+            <ArrowLeft className="mr-2 h-4 w-4" /> Back to App
+          </Link>
+        </Button>
         <Button variant="ghost" size="sm" className="w-full justify-start" onClick={handleSignOut}>
           <LogOut className="mr-2 h-4 w-4" /> Sign Out
         </Button>

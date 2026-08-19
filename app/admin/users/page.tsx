@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Search, Users, Loader2, Ban, CheckCircle2, Wallet } from 'lucide-react';
+import { Search, Users, Loader2, Ban, CheckCircle2, Wallet, Receipt } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { formatCurrency, formatDateTime } from '@/lib/format';
 import { toast } from 'sonner';
@@ -21,6 +21,8 @@ export default function AdminUsersPage() {
   const [selected, setSelected] = useState<any | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [creditAmount, setCreditAmount] = useState('');
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [transactionsLoading, setTransactionsLoading] = useState(false);
 
   const fetchUsers = async () => {
     const { data } = await supabase
@@ -32,6 +34,22 @@ export default function AdminUsersPage() {
   };
 
   useEffect(() => { fetchUsers(); }, []);
+
+  useEffect(() => {
+    if (!selected) {
+      setTransactions([]);
+      return;
+    }
+    setTransactionsLoading(true);
+    supabase
+      .from('transactions')
+      .select('*')
+      .eq('user_id', selected.id)
+      .order('created_at', { ascending: false })
+      .limit(50)
+      .then(({ data }) => setTransactions(data ?? []))
+      .finally(() => setTransactionsLoading(false));
+  }, [selected]);
 
   const filtered = users.filter((u) =>
     u.email.toLowerCase().includes(search.toLowerCase()) ||
@@ -179,6 +197,29 @@ export default function AdminUsersPage() {
                     <Wallet className="mr-1 h-4 w-4" /> Credit
                   </Button>
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm font-medium"><Receipt className="h-4 w-4" /> Transactions</div>
+                {transactionsLoading ? (
+                  <div className="flex justify-center py-4"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+                ) : transactions.length === 0 ? (
+                  <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">No transactions for this user.</p>
+                ) : (
+                  <div className="max-h-48 space-y-2 overflow-y-auto">
+                    {transactions.map((transaction) => (
+                      <div key={transaction.id} className="flex items-center justify-between rounded-lg border p-3 text-sm">
+                        <div>
+                          <div className="font-medium">{transaction.description || transaction.type}</div>
+                          <div className="text-xs text-muted-foreground">{formatDateTime(transaction.created_at)}</div>
+                        </div>
+                        <div className={transaction.type === 'credit' ? 'font-semibold text-green-600' : 'font-semibold text-red-600'}>
+                          {transaction.type === 'credit' ? '+' : '-'}{formatCurrency(Number(transaction.amount))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <Button

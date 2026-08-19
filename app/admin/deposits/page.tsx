@@ -16,17 +16,28 @@ export default function AdminDepositsPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState('');
 
   const fetchDeposits = async () => {
-    const { data } = await supabase
+    setLoadError('');
+    const { data: rawDeposits, error } = await supabase
       .from('deposits')
-      .select(`
-        *,
-        profiles!inner(email, full_name)
-      `)
+      .select('*')
       .order('created_at', { ascending: false })
       .limit(100);
-    setDeposits(data ?? []);
+    if (error) {
+      setLoadError(error.message);
+      setDeposits([]);
+      setLoading(false);
+      return;
+    }
+
+    const userIds = [...new Set((rawDeposits ?? []).map((deposit) => deposit.user_id))];
+    const { data: profiles } = userIds.length
+      ? await supabase.from('profiles').select('id, email, full_name').in('id', userIds)
+      : { data: [] };
+    const profileById = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
+    setDeposits((rawDeposits ?? []).map((deposit) => ({ ...deposit, profiles: profileById.get(deposit.user_id) })));
     setLoading(false);
   };
 
@@ -95,7 +106,7 @@ export default function AdminDepositsPage() {
               <Card>
                 <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
                   <CreditCard className="h-10 w-10 text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">No deposits found</p>
+                  <p className="text-sm text-muted-foreground">{loadError || 'No deposits found'}</p>
                 </CardContent>
               </Card>
             ) : (
