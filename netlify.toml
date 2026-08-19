@@ -1,0 +1,7 @@
+[build]
+command = "npx next build"
+publish = ".next"
+
+[build.environment]
+NODE_VERSION = "18"
+NPM_VERSION = "10"
