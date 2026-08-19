@@ -41,14 +41,19 @@ export default function AdminUsersPage() {
       return;
     }
     setTransactionsLoading(true);
-    supabase
-      .from('transactions')
-      .select('*')
-      .eq('user_id', selected.id)
-      .order('created_at', { ascending: false })
-      .limit(50)
-      .then(({ data }) => setTransactions(data ?? []))
-      .finally(() => setTransactionsLoading(false));
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('transactions')
+          .select('*')
+          .eq('user_id', selected.id)
+          .order('created_at', { ascending: false })
+          .limit(50);
+        setTransactions(data ?? []);
+      } finally {
+        setTransactionsLoading(false);
+      }
+    })();
   }, [selected]);
 
   const filtered = users.filter((u) =>
