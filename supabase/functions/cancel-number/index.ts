@@ -72,16 +72,26 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // Update status
-    await supabase
+    const { data: updatedNumber, error: cancelError } = await supabase
       .from("numbers")
       .update({ status: "cancelled" })
-      .eq("id", number_id);
+      .eq("id", number_id)
+      .in("status", ["active", "pending"])
+      .select("id, cost")
+      .maybeSingle();
 
-    // Refund wallet
+    if (cancelError) {
+      return json({ error: "Failed to cancel number" }, 500);
+    }
+
+    if (!updatedNumber) {
+      return json({ error: "Number already cancelled or unavailable" }, 400);
+    }
+
+    // Refund wallet only once after a successful provider-side cancellation transition.
     await supabase.rpc("credit_wallet", {
       p_user_id: user.id,
-      p_amount: Number(number.cost),
+      p_amount: Number(updatedNumber.cost),
       p_description: "Refund - number cancelled",
       p_reference_type: "number_refund",
       p_reference_id: number_id,
