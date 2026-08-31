@@ -7,6 +7,36 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
 };
 
+const TIGER_COUNTRY_IDS: Record<string, string> = {
+  AF: "74", AL: "155", DZ: "58", AO: "76", AI: "181", AG: "169", AR: "39", AM: "148", AW: "179", AU: "175", AT: "50", AZ: "35",
+  BS: "122", BH: "145", BD: "60", BB: "118", BY: "51", BE: "82", BZ: "124", BJ: "120", BM: "195", BT: "158", BO: "92", BA: "108",
+  BW: "123", BR: "73", BN: "121", BG: "83", BF: "152", BI: "119", KH: "24", CM: "41", CA: "36", CV: "186", KY: "170", CF: "125",
+  TD: "42", CL: "151", CO: "33", KM: "133", CD: "150", CG: "18", CR: "93", CI: "27", HR: "45", CU: "113", CY: "77", CZ: "63",
+  DK: "172", DJ: "168", DM: "126", DO: "109", EC: "105", EG: "21", SV: "101", GQ: "167", ER: "176", EE: "34", ET: "71", FJ: "189",
+  FI: "163", FR: "78", GF: "162", GA: "154", GM: "28", GE: "128", DE: "43", GH: "38", GR: "129", GD: "127", GP: "160", GT: "94",
+  GN: "68", GW: "130", GY: "131", HT: "26", HN: "88", HK: "14", HU: "84", IS: "132", IN: "22", ID: "6", IR: "57", IQ: "47", IE: "23",
+  IL: "13", IT: "86", JM: "103", JP: "182", JO: "116", KZ: "2", KE: "8", KR: "190", XK: "203", KW: "100", KG: "11", LA: "25",
+  LV: "49", LB: "153", LS: "136", LR: "135", LY: "102", LT: "44", LU: "165", MO: "20", MK: "183", MG: "17", MW: "137", MY: "7",
+  MV: "159", ML: "69", MT: "199", MR: "114", MU: "157", MX: "54", MD: "85", MC: "144", MN: "72", ME: "171", MS: "180", MA: "37",
+  MZ: "80", MM: "5", NA: "138", NP: "81", NL: "48", NC: "185", NZ: "67", NI: "90", NE: "139", NG: "19", NO: "174", OM: "107",
+  PK: "66", PS: "188", PA: "112", PG: "79", PY: "87", PE: "65", PH: "4", PL: "15", PT: "117", PR: "97", QA: "111", RE: "146",
+  RO: "32", RW: "140", KN: "134", LC: "164", VC: "166", WS: "198", ST: "178", SA: "53", SN: "61", RS: "29", SC: "184", SL: "115",
+  SG: "196", SK: "141", SI: "59", SB: "193", SO: "149", ZA: "31", SS: "177", ES: "56", LK: "64", SD: "98", SR: "142", SZ: "106",
+  SE: "46", CH: "173", SY: "110", TW: "55", TJ: "143", TZ: "9", TH: "52", TL: "91", TG: "99", TO: "197", TT: "104", TN: "89",
+  TR: "62", TM: "161", UG: "75", UA: "1", AE: "95", GB: "16", US: "187", UY: "156", UZ: "40", VE: "70", VN: "10", YE: "30",
+  ZM: "147", ZW: "96",
+};
+
+function resolveTigerCountryCode(rawCountry: string | undefined): string | undefined {
+  if (!rawCountry) return undefined;
+  const trimmed = rawCountry.trim();
+  if (!trimmed) return undefined;
+  if (/^\d+$/.test(trimmed)) return trimmed;
+
+  const normalized = trimmed.toUpperCase().replace(/[^A-Z]/g, "");
+  return TIGER_COUNTRY_IDS[normalized] ?? trimmed;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 200, headers: corsHeaders });
@@ -125,7 +155,8 @@ Deno.serve(async (req: Request) => {
 });
 
 async function requestTigerSms({ baseUrl, apiKey, service, country }: { baseUrl: string; apiKey: string; service?: string; country?: string }) {
-  if (!baseUrl || !apiKey || !service || !country) {
+  const tigerCountry = resolveTigerCountryCode(country);
+  if (!baseUrl || !apiKey || !service || !tigerCountry) {
     return { success: false, error: "Tiger SMS provider is missing its base URL, API key, service slug, or country code." };
   }
 
@@ -135,7 +166,7 @@ async function requestTigerSms({ baseUrl, apiKey, service, country }: { baseUrl:
   } catch {
     return { success: false, error: "Tiger SMS base URL is invalid. Use https://api.tigersms.com or the full handler_api.php URL." };
   }
-  endpoint.search = new URLSearchParams({ api_key: apiKey, action: "getNumber", service, country }).toString();
+  endpoint.search = new URLSearchParams({ api_key: apiKey, action: "getNumber", service, country: tigerCountry }).toString();
 
   let response: Response;
   try {
