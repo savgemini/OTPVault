@@ -39,6 +39,39 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Number already " + number.status }, 400);
     }
 
+    const { data: provider } = await supabase
+      .from("providers")
+      .select("slug, base_url, api_key_encrypted")
+      .eq("id", number.provider_id)
+      .maybeSingle();
+
+    if (
+      provider &&
+      String(provider.slug || "").toLowerCase().includes("tiger") &&
+      number.provider_activation_id
+    ) {
+      const baseUrl = String(provider.base_url || "").trim();
+      const apiKey = String(provider.api_key_encrypted || "").trim();
+      if (baseUrl && apiKey) {
+        const endpoint = new URL(
+          baseUrl.replace(/\/$/, "").endsWith("handler_api.php")
+            ? baseUrl
+            : `${baseUrl.replace(/\/$/, "")}/stubs/handler_api.php`
+        );
+
+        endpoint.search = new URLSearchParams({
+          api_key: apiKey,
+          action: "setStatus",
+          status: "6",
+          id: String(number.provider_activation_id),
+        }).toString();
+
+        await fetch(endpoint.toString(), {
+          headers: { Accept: "text/plain, application/json" },
+        }).catch(() => undefined);
+      }
+    }
+
     // Update status
     await supabase
       .from("numbers")
@@ -53,8 +86,6 @@ Deno.serve(async (req: Request) => {
       p_reference_type: "number_refund",
       p_reference_id: number_id,
     });
-
-    // In production, call provider API to cancel/release the number here
 
     return json({ success: true }, 200);
   } catch (err: any) {
