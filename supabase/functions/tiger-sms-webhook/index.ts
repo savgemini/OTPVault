@@ -143,11 +143,26 @@ async function verifySignature(rawBody: string, signature: string, secret: strin
   );
 
   const signedBytes = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(rawBody));
-  const expected = Array.from(new Uint8Array(signedBytes))
+  const expectedHex = Array.from(new Uint8Array(signedBytes))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 
-  return normalized.toLowerCase() === expected.toLowerCase();
+  const expectedBase64 = btoa(String.fromCharCode(...new Uint8Array(signedBytes)));
+  const variants = new Set<string>([
+    normalized,
+    normalized.replace(/^sha256=/i, ""),
+    normalized.replace(/^hmac-sha256=/i, ""),
+    normalized.toLowerCase(),
+    normalized.toUpperCase(),
+    expectedHex,
+    expectedHex.toLowerCase(),
+    expectedHex.toUpperCase(),
+    expectedBase64,
+    expectedBase64.replace(/\+/g, "-").replace(/\//g, "_"),
+    expectedBase64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""),
+  ]);
+
+  return Array.from(variants).some((value) => value === normalized || value.toLowerCase() === normalized.toLowerCase());
 }
 
 function extractMessage(payload: any): string {
