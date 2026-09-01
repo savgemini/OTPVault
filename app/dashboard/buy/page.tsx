@@ -279,9 +279,39 @@ export default function BuyNumbersPage() {
                     </div>
 
                     {smsLogs.length === 0 ? (
-                      <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed py-8 text-center">
+                      <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed py-8 text-center">
                         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                         <p className="text-sm text-muted-foreground">Waiting for SMS... Codes appear here automatically</p>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={async () => {
+                            setPolling(true);
+                            try {
+                              const { data: statusResult } = await supabase.functions.invoke('tiger-sms-status', {
+                                body: { number_id: activeNumber.id },
+                              });
+                              
+                              if (statusResult?.success) {
+                                const { data: logs } = await supabase
+                                  .from('sms_logs')
+                                  .select('*')
+                                  .eq('number_id', activeNumber.id)
+                                  .order('created_at', { ascending: false });
+                                if (logs && logs.length > 0) {
+                                  setSmsLogs(logs);
+                                }
+                              }
+                            } catch (err: any) {
+                              console.error('Manual status check failed:', err);
+                            } finally {
+                              setPolling(false);
+                            }
+                          }}
+                          disabled={polling}
+                        >
+                          {polling ? 'Checking...' : 'Check Status Now'}
+                        </Button>
                       </div>
                     ) : (
                       <div className="space-y-2">
