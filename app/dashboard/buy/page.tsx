@@ -140,11 +140,17 @@ export default function BuyNumbersPage() {
 
     const poll = async () => {
       setPolling(true);
-      const { data: logs } = await supabase
-        .from('sms_logs')
-        .select('*')
-        .eq('number_id', activeNumber.id)
-        .order('created_at', { ascending: false });
+
+      const [{ data: logs }, statusResult] = await Promise.all([
+        supabase
+          .from('sms_logs')
+          .select('*')
+          .eq('number_id', activeNumber.id)
+          .order('created_at', { ascending: false }),
+        supabase.functions.invoke('tiger-sms-status', {
+          body: { number_id: activeNumber.id },
+        }),
+      ]);
 
       if (logs && logs.length > 0) {
         setSmsLogs(logs);
@@ -160,6 +166,19 @@ export default function BuyNumbersPage() {
         clearInterval(interval);
         setActiveNumber((prev: any) => ({ ...prev, ...num }));
       }
+
+      if (statusResult?.data?.success && statusResult.data.code) {
+        const { data: refreshedLogs } = await supabase
+          .from('sms_logs')
+          .select('*')
+          .eq('number_id', activeNumber.id)
+          .order('created_at', { ascending: false });
+
+        if (refreshedLogs) {
+          setSmsLogs(refreshedLogs);
+        }
+      }
+
       setPolling(false);
     };
 

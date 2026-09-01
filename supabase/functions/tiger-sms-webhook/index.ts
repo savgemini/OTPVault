@@ -44,8 +44,8 @@ Deno.serve(async (req: Request) => {
     }
 
     const sender = extractSender(payload);
-    const callerNumber = extractPhone(payload);
-    const activationId = extractActivationId(payload);
+    const callerNumber = normalizeNumber(extractPhone(payload));
+    const activationId = normalizeNumber(extractActivationId(payload));
     const code = extractCode(messageText);
 
     let matchQuery = supabase
@@ -54,14 +54,24 @@ Deno.serve(async (req: Request) => {
       .eq("status", "active");
 
     if (activationId) {
-      matchQuery = matchQuery.eq("provider_activation_id", String(activationId));
+      matchQuery = matchQuery.or(`provider_activation_id.eq.${activationId},phone_number.eq.${activationId}`);
     } else if (callerNumber) {
       matchQuery = matchQuery.or(`phone_number.eq.${callerNumber},provider_activation_id.eq.${callerNumber}`);
     }
 
-    const { data: matchedNumber, error: matchError } = await matchQuery.maybeSingle();
+    let { data: matchedNumber, error: matchError } = await matchQuery.maybeSingle();
     if (matchError) {
       return json({ error: `Could not match incoming SMS: ${matchError.message}` }, 500);
+    }
+
+    if (!matchedNumber && activationId) {
+      const fallback = await supabase
+        .from("numbers")
+        .select("id, user_id, phone_number, provider_activation_id, status")
+        .eq("status", "active")
+        .ilike("provider_activation_id", `%${activationId}%`)
+        .maybeSingle();
+      matchedNumber = fallback.data;
     }
 
     if (!matchedNumber) {
@@ -239,13 +249,17 @@ function extractActivationId(payload: any): string | undefined {
   const candidates = [
     payload?.activation_id,
     payload?.activationId,
+    payload?.activationID,
     payload?.id,
     payload?.number_id,
+    payload?.activation,
     payload?.data?.activation_id,
     payload?.data?.activationId,
+    payload?.data?.activationID,
     payload?.data?.id,
     payload?.payload?.activation_id,
     payload?.payload?.activationId,
+    payload?.payload?.activationID,
     payload?.payload?.id,
   ];
 
@@ -254,6 +268,12 @@ function extractActivationId(payload: any): string | undefined {
   }
 
   return undefined;
+}
+
+function normalizeNumber(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim().replace(/^\+/, "").replace(/\s+/g, "");
+  return normalized || undefined;
 }
 
 function extractCode(message: string): string {
