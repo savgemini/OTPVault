@@ -21,6 +21,7 @@ export default function MyNumbersPage() {
   const [selectedNumber, setSelectedNumber] = useState<any | null>(null);
   const [smsLogs, setSmsLogs] = useState<any[]>([]);
   const [loadingSms, setLoadingSms] = useState(false);
+  const [cancelingId, setCancelingId] = useState<string | null>(null);
 
   const fetchNumbers = async () => {
     if (!user) return;
@@ -55,6 +56,9 @@ export default function MyNumbersPage() {
   };
 
   const handleCancel = async (numberId: string) => {
+    if (cancelingId) return;
+    setCancelingId(numberId);
+
     try {
       const { data, error } = await supabase.functions.invoke('cancel-number', {
         body: { number_id: numberId },
@@ -66,6 +70,8 @@ export default function MyNumbersPage() {
       setSelectedNumber(null);
     } catch (err: any) {
       toast.error(err.message);
+    } finally {
+      setCancelingId(null);
     }
   };
 
@@ -137,8 +143,13 @@ export default function MyNumbersPage() {
                           <MessageSquare className="mr-1 h-3 w-3" /> View SMS
                         </Button>
                         {(n.status === 'active' || n.status === 'pending') && (
-                          <Button size="sm" variant="ghost" onClick={() => handleCancel(n.id)}>
-                            <X className="h-3 w-3" />
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleCancel(n.id)}
+                            disabled={cancelingId === n.id || !!cancelingId}
+                          >
+                            {cancelingId === n.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <X className="h-3 w-3" />}
                           </Button>
                         )}
                       </div>

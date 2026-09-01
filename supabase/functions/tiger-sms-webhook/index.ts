@@ -24,7 +24,9 @@ Deno.serve(async (req: Request) => {
     }
 
     const webhookSecret = Deno.env.get("TIGER_SMS_WEBHOOK_SECRET") || "";
-    if (webhookSecret) {
+    const signatureCheckDisabled = ["0", "false", "off", "disabled", "no"].includes((Deno.env.get("TIGER_SMS_WEBHOOK_SIGNATURE_CHECK") || "").toLowerCase());
+
+    if (webhookSecret && !signatureCheckDisabled) {
       const signature = getSignature(req);
       if (!signature || !(await verifySignature(rawBody, signature, webhookSecret))) {
         return json({ error: "Invalid webhook signature" }, 401);

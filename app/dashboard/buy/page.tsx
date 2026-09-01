@@ -40,6 +40,7 @@ export default function BuyNumbersPage() {
   const [activeNumber, setActiveNumber] = useState<any | null>(null);
   const [smsLogs, setSmsLogs] = useState<any[]>([]);
   const [polling, setPolling] = useState(false);
+  const [cancelingActiveNumber, setCancelingActiveNumber] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -168,7 +169,9 @@ export default function BuyNumbersPage() {
   }, [activeNumber?.id]);
 
   const handleCancel = async () => {
-    if (!activeNumber) return;
+    if (!activeNumber || cancelingActiveNumber) return;
+    setCancelingActiveNumber(true);
+
     try {
       const { data, error } = await supabase.functions.invoke('cancel-number', {
         body: { number_id: activeNumber.id },
@@ -180,6 +183,8 @@ export default function BuyNumbersPage() {
       setSmsLogs([]);
     } catch (err: any) {
       toast.error(err.message);
+    } finally {
+      setCancelingActiveNumber(false);
     }
   };
 
@@ -243,8 +248,13 @@ export default function BuyNumbersPage() {
                         {polling && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
                       </div>
                       {(activeNumber.status === 'active' || activeNumber.status === 'pending') && (
-                        <Button size="sm" variant="ghost" onClick={handleCancel}>
-                          <X className="mr-1 h-3 w-3" /> Cancel & Refund
+                        <Button size="sm" variant="ghost" onClick={handleCancel} disabled={cancelingActiveNumber}>
+                          {cancelingActiveNumber ? (
+                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                          ) : (
+                            <X className="mr-1 h-3 w-3" />
+                          )}
+                          {cancelingActiveNumber ? 'Cancelling...' : 'Cancel & Refund'}
                         </Button>
                       )}
                     </div>
