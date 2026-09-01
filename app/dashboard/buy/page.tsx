@@ -42,6 +42,36 @@ export default function BuyNumbersPage() {
   const [polling, setPolling] = useState(false);
   const [cancelingActiveNumber, setCancelingActiveNumber] = useState(false);
 
+  // Restore active number and SMS logs from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('activeNumber');
+    if (saved) {
+      setActiveNumber(JSON.parse(saved));
+    }
+    const savedLogs = localStorage.getItem('activeSmsLogs');
+    if (savedLogs) {
+      setSmsLogs(JSON.parse(savedLogs));
+    }
+  }, []);
+
+  // Persist active number to localStorage
+  useEffect(() => {
+    if (activeNumber) {
+      localStorage.setItem('activeNumber', JSON.stringify(activeNumber));
+    } else {
+      localStorage.removeItem('activeNumber');
+    }
+  }, [activeNumber]);
+
+  // Persist SMS logs to localStorage
+  useEffect(() => {
+    if (smsLogs.length > 0) {
+      localStorage.setItem('activeSmsLogs', JSON.stringify(smsLogs));
+    } else {
+      localStorage.removeItem('activeSmsLogs');
+    }
+  }, [smsLogs]);
+
   useEffect(() => {
     (async () => {
       const [{ data: svcs }, { data: ctrys }] = await Promise.all([
@@ -122,6 +152,7 @@ export default function BuyNumbersPage() {
 
       toast.success('Number purchased successfully!');
       setActiveNumber(data.number);
+      localStorage.setItem('activeNumber', JSON.stringify(data.number));
       await refreshProfile();
       setOffers([]);
       setSelectedService('');
@@ -165,6 +196,7 @@ export default function BuyNumbersPage() {
       if (num && (num.status === 'completed' || num.status === 'cancelled' || num.status === 'expired')) {
         clearInterval(interval);
         setActiveNumber((prev: any) => ({ ...prev, ...num }));
+        // Don't clear localStorage here - keep showing the completed/expired number
       }
 
       if (statusResult?.data?.success && statusResult.data.code) {
@@ -200,6 +232,8 @@ export default function BuyNumbersPage() {
       await refreshProfile();
       setActiveNumber(null);
       setSmsLogs([]);
+      localStorage.removeItem('activeNumber');
+      localStorage.removeItem('activeSmsLogs');
     } catch (err: any) {
       toast.error(err.message);
     } finally {
@@ -336,7 +370,7 @@ export default function BuyNumbersPage() {
                     )}
                   </div>
 
-                  <Button variant="outline" size="sm" className="mt-4" onClick={() => { setActiveNumber(null); setSmsLogs([]); }}>
+                  <Button variant="outline" size="sm" className="mt-4" onClick={() => { setActiveNumber(null); setSmsLogs([]); localStorage.removeItem('activeNumber'); localStorage.removeItem('activeSmsLogs'); }}>
                     Buy another number
                   </Button>
                 </CardContent>
