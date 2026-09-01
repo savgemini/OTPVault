@@ -20,6 +20,8 @@ export default function WalletPage() {
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [bankDetails, setBankDetails] = useState<any | null>(null);
+  const [bankDetailsLoading, setBankDetailsLoading] = useState(true);
 
   const handlePaystackCheckout = async () => {
     const amt = parseFloat(amount);
@@ -78,6 +80,31 @@ export default function WalletPage() {
       }
     })();
   }, [user]);
+
+  // Fetch bank transfer details from gateway settings
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('gateways')
+          .select('account_number, bank_name, account_name')
+          .eq('slug', 'vpay')
+          .maybeSingle();
+        
+        if (data) {
+          setBankDetails({
+            account_number: data.account_number,
+            bank_name: data.bank_name,
+            account_name: data.account_name,
+          });
+        }
+      } catch (err) {
+        console.error('Failed to fetch bank details:', err);
+      } finally {
+        setBankDetailsLoading(false);
+      }
+    })();
+  }, []);
 
   const refreshDeposits = async () => {
     if (!user) return;
@@ -183,9 +210,17 @@ export default function WalletPage() {
                         </div>
                         <p>Transfer to our corporate account, then submit the deposit for admin approval:</p>
                         <div className="mt-2 space-y-1">
-                          <div><strong>Bank:</strong> VPay Bank</div>
-                          <div><strong>Account:</strong> 0123456789</div>
-                          <div><strong>Name:</strong> OTPSuite Ltd</div>
+                          {bankDetailsLoading ? (
+                            <p className="text-xs text-muted-foreground">Loading bank details...</p>
+                          ) : bankDetails ? (
+                            <>
+                              <div><strong>Bank:</strong> {bankDetails.bank_name || 'Bank information not configured'}</div>
+                              <div><strong>Account:</strong> {bankDetails.account_number || 'Account number not configured'}</div>
+                              <div><strong>Name:</strong> {bankDetails.account_name || 'Account name not configured'}</div>
+                            </>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">Bank details are not yet configured. Please contact support.</p>
+                          )}
                         </div>
                       </div>
                       <div>
@@ -198,7 +233,7 @@ export default function WalletPage() {
                           onChange={(e) => setAmount(e.target.value)}
                         />
                       </div>
-                      <Button className="w-full" onClick={handleManualDeposit} disabled={creating}>
+                      <Button className="w-full" onClick={handleManualDeposit} disabled={creating || !bankDetails}>
                         {creating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Clock className="mr-2 h-4 w-4" />}
                         Submit for Approval
                       </Button>
