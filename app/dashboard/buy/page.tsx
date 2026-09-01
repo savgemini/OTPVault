@@ -41,6 +41,7 @@ export default function BuyNumbersPage() {
   const [smsLogs, setSmsLogs] = useState<any[]>([]);
   const [polling, setPolling] = useState(false);
   const [cancelingActiveNumber, setCancelingActiveNumber] = useState(false);
+  const [timeRemaining, setTimeRemaining] = useState<number>(0);
 
   // Restore active number and SMS logs from localStorage on mount
   useEffect(() => {
@@ -71,6 +72,38 @@ export default function BuyNumbersPage() {
       localStorage.removeItem('activeSmsLogs');
     }
   }, [smsLogs]);
+
+  // Timer countdown and auto-cancel
+  useEffect(() => {
+    if (!activeNumber) return;
+
+    // Calculate time remaining (10 minutes = 600 seconds)
+    const createdAt = new Date(activeNumber.created_at).getTime();
+    const expiresAt = createdAt + 10 * 60 * 1000; // 10 minutes
+    const now = Date.now();
+    const remaining = Math.max(0, Math.floor((expiresAt - now) / 1000));
+    setTimeRemaining(remaining);
+
+    // If time expired, auto-cancel
+    if (remaining <= 0) {
+      handleCancel();
+      return;
+    }
+
+    // Countdown timer
+    const timer = setInterval(() => {
+      setTimeRemaining((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          handleCancel();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [activeNumber?.id]);
 
   useEffect(() => {
     (async () => {
@@ -245,6 +278,12 @@ export default function BuyNumbersPage() {
     s.name.toLowerCase().includes(search.toLowerCase())
   );
 
+  const formatTimeRemaining = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <DashboardSidebar />
@@ -275,9 +314,14 @@ export default function BuyNumbersPage() {
                       </CardTitle>
                       <CardDescription>Use this number to receive your verification code</CardDescription>
                     </div>
-                    <Badge variant="outline" className={statusColor(activeNumber.status)}>
-                      {activeNumber.status}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className={statusColor(activeNumber.status)}>
+                        {activeNumber.status}
+                      </Badge>
+                      <Badge variant={timeRemaining <= 60 ? 'destructive' : 'secondary'} className="font-mono">
+                        ⏱ {formatTimeRemaining(timeRemaining)}
+                      </Badge>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -286,11 +330,9 @@ export default function BuyNumbersPage() {
                     <div className="mt-1 font-mono text-2xl font-bold tracking-wider">
                       {activeNumber.phone_number || 'Waiting for number...'}
                     </div>
-                    {activeNumber.expires_at && (
-                      <div className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
-                        <Clock className="h-3 w-3" /> Expires: {formatDateTime(activeNumber.expires_at)}
-                      </div>
-                    )}
+                    <div className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+                      <Clock className="h-3 w-3" /> Expires in: <span className="font-semibold">{formatTimeRemaining(timeRemaining)}</span>
+                    </div>
                   </div>
 
                   {/* SMS Inbox */}
