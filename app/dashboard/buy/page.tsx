@@ -42,6 +42,8 @@ export default function BuyNumbersPage() {
   const [polling, setPolling] = useState(false);
   const [cancelingActiveNumber, setCancelingActiveNumber] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<number>(0);
+  const [usaCountryId, setUsaCountryId] = useState<string>('');
+  const [servicesWithPrices, setServicesWithPrices] = useState<any[]>([]);
 
   // Restore active number and SMS logs from localStorage on mount
   useEffect(() => {
@@ -113,12 +115,23 @@ export default function BuyNumbersPage() {
       ]);
       setServices(svcs ?? []);
       setCountries(ctrys ?? []);
+      
+      // Find USA country
+      const usa = (ctrys ?? []).find((c: any) => c.code?.toUpperCase() === 'US' || c.name?.toUpperCase() === 'USA');
+      if (usa) {
+        setUsaCountryId(usa.id);
+        setSelectedCountry(usa.id);
+      }
+      
       setLoading(false);
     })();
   }, []);
 
-  const searchOffers = useCallback(async () => {
-    if (!selectedService || !selectedCountry) return;
+  const searchOffers = useCallback(async (serviceId?: string, countryId?: string) => {
+    const service = serviceId || selectedService;
+    const country = countryId || selectedCountry;
+    
+    if (!service || !country) return;
     setSearching(true);
     setOffers([]);
     setOfferError('');
@@ -129,8 +142,8 @@ export default function BuyNumbersPage() {
         id, our_price, stock, active, provider_id,
         providers!inner(name, active)
       `)
-      .eq('service_id', selectedService)
-      .eq('country_id', selectedCountry)
+      .eq('service_id', service)
+      .eq('country_id', country)
       .eq('active', true)
       .eq('providers.active', true)
       .order('our_price', { ascending: true });
@@ -151,6 +164,36 @@ export default function BuyNumbersPage() {
     setOffers(mapped);
     setSearching(false);
   }, [selectedService, selectedCountry]);
+
+  // Fetch services with prices for a country
+  const fetchServicesWithPrices = useCallback(async (countryId: string) => {
+    const { data, error } = await supabase
+      .from('provider_services')
+      .select(`
+        service_id,
+        our_price,
+        services(id, name, slug)
+      `)
+      .eq('country_id', countryId)
+      .eq('active', true);
+
+    if (!error && data) {
+      // Group by service and get the first (cheapest) price
+      const servicesMap = new Map<string, any>();
+      data.forEach((ps: any) => {
+        if (ps.services && !servicesMap.has(ps.service_id)) {
+          servicesMap.set(ps.service_id, {
+            id: ps.services.id,
+            name: ps.services.name,
+            slug: ps.services.slug,
+            price: Number(ps.our_price),
+          });
+        }
+      });
+      const svcs = Array.from(servicesMap.values()).sort((a, b) => a.price - b.price);
+      setServicesWithPrices(svcs);
+    }
+  }, []);
 
   const handlePurchase = async (offer: Offer) => {
     if (!user) return;
@@ -196,6 +239,20 @@ export default function BuyNumbersPage() {
       setPurchasing(null);
     }
   };
+
+  // Auto-search when service and country are selected
+  useEffect(() => {
+    if (selectedService && selectedCountry) {
+      searchOffers(selectedService, selectedCountry);
+    }
+  }, [selectedService, selectedCountry, searchOffers]);
+
+  // Fetch services with prices when country changes
+  useEffect(() => {
+    if (selectedCountry) {
+      fetchServicesWithPrices(selectedCountry);
+    }
+  }, [selectedCountry, fetchServicesWithPrices]);
 
   // Poll for SMS on active number
   useEffect(() => {
@@ -421,24 +478,26 @@ export default function BuyNumbersPage() {
 
             {!activeNumber && (
               <>
-                {/* Step 1: Select Country & Service */}
-                <div className="grid gap-6 lg:grid-cols-2">
+                {/* USA Numbers Section */}
+                <div className="mb-8">
+                  <h2 className="mb-4 text-xl font-bold">🇺🇸 USA Numbers</h2>
                   <Card>
                     <CardHeader>
-                      <CardTitle className="text-lg">1. Select Country</CardTitle>
+                      <CardTitle className="text-lg">Select a Service</CardTitle>
+                      <CardDescription>Choose a service to get a US number</CardDescription>
                     </CardHeader>
                     <CardContent>
                       {loading ? (
                         <Skeleton className="h-10 w-full" />
                       ) : (
-                        <Select value={selectedCountry} onValueChange={setSelectedCountry}>
+                        <Select value={selectedService} onValueChange={setSelectedService}>
                           <SelectTrigger>
-                            <SelectValue placeholder="Choose a country" />
+                            <SelectValue placeholder="Choose a service" />
                           </SelectTrigger>
                           <SelectContent>
-                            {countries.map((c) => (
-                              <SelectItem key={c.id} value={c.id}>
-                                <span className="mr-2">{c.flag}</span> {c.name}
+                            {servicesWithPrices.map((s) => (
+                              <SelectItem key={s.id} value={s.id}>
+                                {s.name} • {formatCurrency(s.price)}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -447,94 +506,157 @@ export default function BuyNumbersPage() {
                     </CardContent>
                   </Card>
 
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-lg">2. Select Service</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {loading ? (
-                        <Skeleton className="h-10 w-full" />
-                      ) : (
-                        <>
-                          <div className="relative mb-3">
-                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                            <Input
-                              placeholder="Search services..."
-                              value={search}
-                              onChange={(e) => setSearch(e.target.value)}
-                              className="pl-9"
-                            />
-                          </div>
+                  {/* Offers for USA */}
+                  {selectedService && selectedCountry === usaCountryId && offers.length > 0 && (
+                    <Card className="mt-4">
+                      <CardHeader>
+                        <CardTitle className="text-lg">Available Providers</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-3">
+                          {offers.map((offer) => (
+                            <div key={offer.provider_service_id} className="flex items-center justify-between rounded-lg border p-4">
+                              <div>
+                                <div className="font-medium">{offer.provider_name}</div>
+                                <div className="mt-1 flex items-center gap-3 text-sm text-muted-foreground">
+                                  <span className="flex items-center gap-1">
+                                    <span className="h-2 w-2 rounded-full bg-green-500" /> {offer.stock > 0 ? `${offer.stock} in stock` : 'Available'}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-4">
+                                <div className="text-right">
+                                  <div className="text-lg font-bold">{formatCurrency(offer.our_price)}</div>
+                                </div>
+                                <Button
+                                  size="sm"
+                                  onClick={() => handlePurchase(offer)}
+                                  disabled={purchasing === offer.provider_service_id}
+                                >
+                                  {purchasing === offer.provider_service_id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Buy'}
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {selectedService && selectedCountry === usaCountryId && !searching && offers.length === 0 && (
+                    <div className="mt-4 rounded-lg border border-dashed py-8 text-center">
+                      <Smartphone className="mx-auto h-10 w-10 text-muted-foreground" />
+                      <p className="mt-3 text-sm text-muted-foreground">{offerError || 'No available providers for this service.'}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Other Countries Section */}
+                <div>
+                  <h2 className="mb-4 text-xl font-bold">🌍 Other Countries</h2>
+                  <div className="grid gap-6 lg:grid-cols-2">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-lg">1. Select Country</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        {loading ? (
+                          <Skeleton className="h-10 w-full" />
+                        ) : (
+                          <Select 
+                            value={selectedCountry !== usaCountryId ? selectedCountry : ''}
+                            onValueChange={(value) => {
+                              setSelectedCountry(value);
+                              setSelectedService('');
+                              setOffers([]);
+                            }}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Choose a country" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {countries.filter((c) => c.id !== usaCountryId).map((c) => (
+                                <SelectItem key={c.id} value={c.id}>
+                                  <span className="mr-2">{c.flag}</span> {c.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </CardContent>
+                    </Card>
+
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-lg">2. Select Service</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        {loading ? (
+                          <Skeleton className="h-10 w-full" />
+                        ) : selectedCountry === usaCountryId || !selectedCountry ? (
+                          <p className="text-sm text-muted-foreground">Select a country first</p>
+                        ) : (
                           <Select value={selectedService} onValueChange={setSelectedService}>
                             <SelectTrigger>
                               <SelectValue placeholder="Choose a service" />
                             </SelectTrigger>
                             <SelectContent>
-                              {filteredServices.map((s) => (
-                                <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                              {servicesWithPrices.map((s) => (
+                                <SelectItem key={s.id} value={s.id}>
+                                  {s.name} • {formatCurrency(s.price)}
+                                </SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
-                        </>
-                      )}
-                    </CardContent>
-                  </Card>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Offers for Other Countries */}
+                  {selectedService && selectedCountry !== usaCountryId && offers.length > 0 && (
+                    <Card className="mt-6">
+                      <CardHeader>
+                        <CardTitle className="text-lg">Available Providers</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-3">
+                          {offers.map((offer) => (
+                            <div key={offer.provider_service_id} className="flex items-center justify-between rounded-lg border p-4">
+                              <div>
+                                <div className="font-medium">{offer.provider_name}</div>
+                                <div className="mt-1 flex items-center gap-3 text-sm text-muted-foreground">
+                                  <span className="flex items-center gap-1">
+                                    <span className="h-2 w-2 rounded-full bg-green-500" /> {offer.stock > 0 ? `${offer.stock} in stock` : 'Available'}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-4">
+                                <div className="text-right">
+                                  <div className="text-lg font-bold">{formatCurrency(offer.our_price)}</div>
+                                </div>
+                                <Button
+                                  size="sm"
+                                  onClick={() => handlePurchase(offer)}
+                                  disabled={purchasing === offer.provider_service_id}
+                                >
+                                  {purchasing === offer.provider_service_id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Buy'}
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {selectedService && selectedCountry !== usaCountryId && !searching && offers.length === 0 && (
+                    <div className="mt-6 rounded-lg border border-dashed py-12 text-center">
+                      <Smartphone className="mx-auto h-10 w-10 text-muted-foreground" />
+                      <p className="mt-3 text-sm text-muted-foreground">{offerError || 'No active provider is configured for this service and country.'}</p>
+                    </div>
+                  )}
                 </div>
-
-                {/* Search button */}
-                {selectedService && selectedCountry && (
-                  <div className="mt-4">
-                    <Button onClick={searchOffers} disabled={searching} className="w-full sm:w-auto">
-                      {searching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
-                      Search Available Numbers
-                    </Button>
-                  </div>
-                )}
-
-                {/* Offers */}
-                {offers.length > 0 && (
-                  <Card className="mt-6">
-                    <CardHeader>
-                      <CardTitle className="text-lg">3. Choose a Provider</CardTitle>
-                      <CardDescription>Prices include our markup. Cheapest first.</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        {offers.map((offer) => (
-                          <div key={offer.provider_service_id} className="flex items-center justify-between rounded-lg border p-4">
-                            <div>
-                              <div className="font-medium">{offer.provider_name}</div>
-                              <div className="mt-1 flex items-center gap-3 text-sm text-muted-foreground">
-                                <span className="flex items-center gap-1">
-                                  <span className="h-2 w-2 rounded-full bg-green-500" /> {offer.stock > 0 ? `${offer.stock} in stock` : 'Available'}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-4">
-                              <div className="text-right">
-                                <div className="text-lg font-bold">{formatCurrency(offer.our_price)}</div>
-                              </div>
-                              <Button
-                                size="sm"
-                                onClick={() => handlePurchase(offer)}
-                                disabled={purchasing === offer.provider_service_id}
-                              >
-                                {purchasing === offer.provider_service_id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Buy'}
-                              </Button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-
-                {selectedService && selectedCountry && !searching && offers.length === 0 && (
-                  <div className="mt-6 rounded-lg border border-dashed py-12 text-center">
-                    <Smartphone className="mx-auto h-10 w-10 text-muted-foreground" />
-                    <p className="mt-3 text-sm text-muted-foreground">{offerError || 'No active provider is configured for this service and country.'}</p>
-                  </div>
-                )}
               </>
             )}
           </div>
