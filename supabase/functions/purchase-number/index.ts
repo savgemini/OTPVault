@@ -92,7 +92,7 @@ Deno.serve(async (req: Request) => {
 
     const providerResult = providerSlug === "5sim"
       ? await request5sim({ baseUrl: ps.providers.base_url, apiKey: ps.providers.api_key_encrypted, service: ps.services?.slug, countryName: ps.countries?.name, countryCode: ps.countries?.code })
-      : await requestTigerSms({ baseUrl: ps.providers.base_url, apiKey: ps.providers.api_key_encrypted, service: ps.services?.slug, country: ps.countries?.code });
+      : await requestTigerSms({ baseUrl: ps.providers.base_url, apiKey: ps.providers.api_key_encrypted, service: ps.services?.slug, country: ps.countries?.code, maxPrice: Number(ps.max_price ?? ps.our_price ?? 0) });
     if (!providerResult.success) return json({ error: providerResult.error }, 400);
 
     // Debit wallet
@@ -154,7 +154,7 @@ Deno.serve(async (req: Request) => {
   }
 });
 
-async function requestTigerSms({ baseUrl, apiKey, service, country }: { baseUrl: string; apiKey: string; service?: string; country?: string }) {
+async function requestTigerSms({ baseUrl, apiKey, service, country, maxPrice }: { baseUrl: string; apiKey: string; service?: string; country?: string; maxPrice?: number | string }) {
   const tigerCountry = resolveTigerCountryCode(country);
   if (!baseUrl || !apiKey || !service || !tigerCountry) {
     return { success: false, error: "Tiger SMS provider is missing its base URL, API key, service slug, or country code." };
@@ -166,7 +166,14 @@ async function requestTigerSms({ baseUrl, apiKey, service, country }: { baseUrl:
   } catch {
     return { success: false, error: "Tiger SMS base URL is invalid. Use https://api.tigersms.com or the full handler_api.php URL." };
   }
-  endpoint.search = new URLSearchParams({ api_key: apiKey, action: "getNumber", service, country: tigerCountry }).toString();
+
+  const params: Record<string, string> = { api_key: apiKey, action: "getNumber", service, country: tigerCountry };
+  const resolvedMaxPrice = Number(maxPrice ?? 0);
+  if (Number.isFinite(resolvedMaxPrice) && resolvedMaxPrice > 0) {
+    params.maxPrice = String(resolvedMaxPrice);
+  }
+
+  endpoint.search = new URLSearchParams(params).toString();
 
   let response: Response;
   try {

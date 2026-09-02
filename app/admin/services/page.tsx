@@ -22,8 +22,9 @@ export default function AdminServicesPage() {
   const [editing, setEditing] = useState<any | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [tab, setTab] = useState('services');
-  const [form, setForm] = useState({ name: '', slug: '', provider_id: '', country_id: '', provider_price: 0, our_price: 0, stock: 0, sort_order: 0, active: true });
-  const [allCountries, setAllCountries] = useState(false);
+  const [form, setForm] = useState({ name: '', slug: '', provider_id: '', active: true });
+  const [countryPrices, setCountryPrices] = useState<Record<string, number>>({});
+  const [countryMaxPrices, setCountryMaxPrices] = useState<Record<string, number>>({});
   const [countryForm, setCountryForm] = useState({ name: '', code: '', flag: '', sort_order: 0, active: true });
 
   const fetchData = async () => {
@@ -44,36 +45,75 @@ export default function AdminServicesPage() {
   const is5sim = selectedProvider?.slug?.toLowerCase() === '5sim';
 
   const handleSaveService = async () => {
-    if (!form.name || !form.slug || !form.provider_id || (!form.country_id && !allCountries)) { toast.error('Name, slug, provider, and country are required'); return; }
+    if (!form.name || !form.slug || !form.provider_id) {
+      toast.error('Name, slug, and provider are required');
+      return;
+    }
+
+    const countriesToAssign = countries.filter((country) => country.active && typeof countryPrices[country.id] === 'number');
+    const validCountryPrices = countriesToAssign.filter((country) => Number(countryPrices[country.id]) >= 0);
+
+    if (!validCountryPrices.length) {
+      toast.error('Add at least one price for an active country');
+      return;
+    }
+
+    const invalidMaxPrice = validCountryPrices.find((country) => {
+      const ourPrice = Number(countryPrices[country.id] || 0);
+      const maxPrice = Number(countryMaxPrices[country.id] ?? ourPrice ?? 0);
+      return maxPrice > 0 && maxPrice < ourPrice;
+    });
+
+    if (invalidMaxPrice) {
+      toast.error(`Max price must be at least the selling price for ${countries.find((country) => country.id === invalidMaxPrice.id)?.name ?? 'this country'}`);
+      return;
+    }
+
     let serviceId = editing?.id;
     if (editing) {
-      const { provider_id, country_id, provider_price, our_price, stock, ...serviceForm } = form;
-      const { error } = await supabase.from('services').update(serviceForm).eq('id', editing.id);
-      if (error) toast.error('Failed to update'); else toast.success('Service updated');
+      const { provider_id, active, ...serviceForm } = form;
+      const { error } = await supabase.from('services').update({ ...serviceForm, active }).eq('id', editing.id);
+      if (error) {
+        toast.error('Failed to update service');
+        return;
+      }
     } else {
-      const { provider_id, country_id, provider_price, our_price, stock, ...serviceForm } = form;
-      const { data, error } = await supabase.from('services').insert(serviceForm).select('id').single();
+      const { provider_id, active, ...serviceForm } = form;
+      const { data, error } = await supabase.from('services').insert({ ...serviceForm, active }).select('id').single();
       serviceId = data?.id;
-      if (error) { toast.error('Failed to create'); return; }
+      if (error) {
+        toast.error('Failed to create service');
+        return;
+      }
     }
-    const countriesToAssign = allCountries ? countries.filter((country) => country.active) : countries.filter((country) => country.id === form.country_id);
+
+    const relationRows = validCountryPrices.map((country) => ({
+      provider_id: form.provider_id,
+      service_id: serviceId,
+      country_id: country.id,
+      provider_price: 0,
+      our_price: Number(countryPrices[country.id] || 0),
+      max_price: Number(countryMaxPrices[country.id] ?? countryPrices[country.id] ?? 0),
+      stock: 0,
+      active: true,
+    }));
+
     const { error: relationError } = await supabase.from('provider_services').upsert(
-      countriesToAssign.map((country) => ({
-        provider_id: form.provider_id,
-        service_id: serviceId,
-        country_id: country.id,
-        provider_price: form.provider_price,
-        our_price: form.our_price,
-        stock: form.stock,
-        active: form.active,
-      })),
+      relationRows,
       { onConflict: 'provider_id,service_id,country_id' }
     );
-    if (relationError) { toast.error('Service saved, but provider assignment failed'); return; }
+
+    if (relationError) {
+      toast.error('Service saved, but country pricing failed');
+      return;
+    }
+
     toast.success(editing ? 'Service updated' : 'Service created');
-    setEditing(null); setShowForm(false);
-    setForm({ name: '', slug: '', provider_id: '', country_id: '', provider_price: 0, our_price: 0, stock: 0, sort_order: 0, active: true });
-    setAllCountries(false);
+    setEditing(null);
+    setShowForm(false);
+    setForm({ name: '', slug: '', provider_id: '', active: true });
+    setCountryPrices({});
+    setCountryMaxPrices({});
     fetchData();
   };
 
@@ -123,7 +163,7 @@ export default function AdminServicesPage() {
               {/* Services Tab */}
               <TabsContent value="services">
                 <div className="mb-4">
-                  <Button onClick={() => { setEditing(null); setForm({ name: '', slug: '', provider_id: '', country_id: '', provider_price: 0, our_price: 0, stock: 0, sort_order: 0, active: true }); setAllCountries(false); setShowForm(true); }}>
+                  <Button onClick={() => { setEditing(null); setForm({ name: '', slug: '', provider_id: '', active: true }); setCountryPrices({}); setCountryMaxPrices({}); setShowForm(true); }}>
                     <Plus className="mr-2 h-4 w-4" /> Add Service
                   </Button>
                 </div>
@@ -140,29 +180,59 @@ export default function AdminServicesPage() {
                       <div className="grid gap-4 sm:grid-cols-2">
                         <div><Label>Name</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="WhatsApp" /></div>
                         <div><Label>Slug</Label><Input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} placeholder="whatsapp" /></div>
-                        <div>
+                        <div className="sm:col-span-2">
                           <Label>Provider</Label>
                           <Select value={form.provider_id} onValueChange={(value) => setForm({ ...form, provider_id: value })}>
                             <SelectTrigger><SelectValue placeholder="Choose provider" /></SelectTrigger>
                             <SelectContent>{providers.filter((provider) => provider.active).map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.name}</SelectItem>)}</SelectContent>
                           </Select>
                         </div>
-                        <div>
-                          <Label>Country</Label>
-                          <Select value={allCountries ? 'all' : form.country_id} onValueChange={(value) => { setAllCountries(value === 'all'); setForm({ ...form, country_id: value === 'all' ? '' : value }); }}>
-                            <SelectTrigger><SelectValue placeholder="Choose country" /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">All active countries</SelectItem>
-                              {countries.filter((country) => country.active).map((country) => <SelectItem key={country.id} value={country.id}>{country.flag} {country.name}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        {!is5sim && <div><Label>Provider Price</Label><Input type="number" min="0" step="0.01" value={form.provider_price} onChange={(e) => setForm({ ...form, provider_price: parseFloat(e.target.value) || 0 })} /></div>}
-                        {!is5sim && <div><Label>Our Price</Label><Input type="number" min="0" step="0.01" value={form.our_price} onChange={(e) => setForm({ ...form, our_price: parseFloat(e.target.value) || 0 })} /></div>}
-                        <div><Label>Stock</Label><Input type="number" min="0" value={form.stock} onChange={(e) => setForm({ ...form, stock: parseInt(e.target.value) || 0 })} /></div>
-                        <div><Label>Sort Order</Label><Input type="number" value={form.sort_order} onChange={(e) => setForm({ ...form, sort_order: parseInt(e.target.value) })} /></div>
                       </div>
-                      {is5sim && <p className="text-xs text-muted-foreground">5sim prices and stock are filled automatically. Use Sync Prices on the 5sim provider after saving.</p>}
+
+                      <div className="rounded-lg border p-3">
+                        <div className="mb-3 flex items-center justify-between">
+                          <h3 className="text-sm font-medium">Country pricing</h3>
+                          <span className="text-xs text-muted-foreground">Set your selling price and Tiger max price per country</span>
+                        </div>
+                        <div className="space-y-3">
+                          {countries.filter((country) => country.active).map((country) => (
+                            <div key={country.id} className="grid grid-cols-[1fr_120px_120px] items-center gap-3">
+                              <div className="flex items-center gap-2">
+                                <span className="text-lg">{country.flag}</span>
+                                <span className="text-sm font-medium">{country.name}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  placeholder="Our price"
+                                  value={countryPrices[country.id] ?? ''}
+                                  onChange={(e) => setCountryPrices((prev) => ({
+                                    ...prev,
+                                    [country.id]: e.target.value === '' ? 0 : Number(e.target.value),
+                                  }))}
+                                />
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  placeholder="Max price"
+                                  value={countryMaxPrices[country.id] ?? countryPrices[country.id] ?? ''}
+                                  onChange={(e) => setCountryMaxPrices((prev) => ({
+                                    ...prev,
+                                    [country.id]: e.target.value === '' ? 0 : Number(e.target.value),
+                                  }))}
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {is5sim && <p className="text-xs text-muted-foreground">For 5sim, keep only the country price here. Stock is synced separately.</p>}
                       <div className="flex items-center gap-2"><Switch checked={form.active} onCheckedChange={(c) => setForm({ ...form, active: c })} /><Label>Active</Label></div>
                       <Button onClick={handleSaveService}><Save className="mr-2 h-4 w-4" /> Save</Button>
                     </CardContent>
@@ -188,8 +258,20 @@ export default function AdminServicesPage() {
                             <Button size="sm" variant="outline" onClick={async () => {
                               const { data: relation } = await supabase.from('provider_services').select('*').eq('service_id', s.id).limit(1).maybeSingle();
                               setEditing(s);
-                              setAllCountries(false);
-                              setForm({ name: s.name, slug: s.slug, provider_id: relation?.provider_id ?? '', country_id: relation?.country_id ?? '', provider_price: Number(relation?.provider_price ?? 0), our_price: Number(relation?.our_price ?? 0), stock: Number(relation?.stock ?? 0), sort_order: s.sort_order, active: s.active });
+                              const { data: relations } = await supabase
+                                .from('provider_services')
+                                .select('*')
+                                .eq('service_id', s.id)
+                                .order('updated_at', { ascending: false });
+                              const nextCountryPrices: Record<string, number> = {};
+                              const nextCountryMaxPrices: Record<string, number> = {};
+                              (relations ?? []).forEach((rel) => {
+                                nextCountryPrices[rel.country_id] = Number(rel.our_price ?? 0);
+                                nextCountryMaxPrices[rel.country_id] = Number(rel.max_price ?? rel.our_price ?? 0);
+                              });
+                              setForm({ name: s.name, slug: s.slug, provider_id: relation?.provider_id ?? '', active: s.active });
+                              setCountryPrices(nextCountryPrices);
+                              setCountryMaxPrices(nextCountryMaxPrices);
                               setShowForm(true);
                             }}>
                               <Edit className="h-3 w-3" />

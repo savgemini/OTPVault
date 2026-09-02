@@ -188,6 +188,7 @@ CREATE TABLE IF NOT EXISTS public.provider_services (
   country_id uuid NOT NULL REFERENCES public.countries(id) ON DELETE CASCADE,
   provider_price numeric(18,2) NOT NULL DEFAULT 0,
   our_price numeric(18,2) NOT NULL DEFAULT 0,
+  max_price numeric(18,2) NOT NULL DEFAULT 0,
   stock int NOT NULL DEFAULT 0,
   active boolean NOT NULL DEFAULT true,
   updated_at timestamptz NOT NULL DEFAULT now(),
