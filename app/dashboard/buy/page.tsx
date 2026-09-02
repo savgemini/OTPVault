@@ -49,6 +49,12 @@ export default function BuyNumbersPage() {
   const [usaServicesWithPrices, setUsaServicesWithPrices] = useState<any[]>([]);
   const [otherServicesWithPrices, setOtherServicesWithPrices] = useState<any[]>([]);
 
+  const isUsaCountry = (country: Country) => {
+    const code = country.code?.trim().toUpperCase();
+    const name = country.name?.trim().toUpperCase();
+    return code === 'US' || code === 'USA' || name === 'USA' || name === 'UNITED STATES' || name === 'UNITED STATES OF AMERICA';
+  };
+
   // Restore active number and SMS logs from localStorage on mount
   useEffect(() => {
     const saved = localStorage.getItem('activeNumber');
@@ -123,12 +129,12 @@ export default function BuyNumbersPage() {
         setCountries(ctrys ?? []);
         
         // Find USA country and load its services
-        const usa = (ctrys ?? []).find((c: any) => c.code?.toUpperCase() === 'US' || c.name?.toUpperCase() === 'USA');
+        const usa = (ctrys ?? []).find(isUsaCountry);
         if (usa) {
           setUsaCountryId(usa.id);
           
           // Fetch USA services
-          const { data: usaServices } = await supabase
+          const { data: usaServices, error: usaServicesError } = await supabase
             .from('provider_services')
             .select(`
               service_id,
@@ -152,6 +158,8 @@ export default function BuyNumbersPage() {
             });
             const sorted = Array.from(servicesMap.values()).sort((a, b) => a.price - b.price);
             setUsaServicesWithPrices(sorted);
+          } else {
+            console.error('Failed to load USA services:', usaServicesError);
           }
         }
         
@@ -654,7 +662,7 @@ export default function BuyNumbersPage() {
                                   <SelectValue placeholder="Choose a country" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                  {countries.filter((c) => c.id !== usaCountryId).map((c) => (
+                                  {countries.filter((c) => !isUsaCountry(c)).map((c) => (
                                     <SelectItem key={c.id} value={c.id}>
                                       <span className="mr-2">{c.flag}</span> {c.name}
                                     </SelectItem>
