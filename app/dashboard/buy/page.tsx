@@ -29,21 +29,25 @@ export default function BuyNumbersPage() {
   const { user, profile, refreshProfile } = useAuth();
   const [services, setServices] = useState<Service[]>([]);
   const [countries, setCountries] = useState<Country[]>([]);
-  const [selectedService, setSelectedService] = useState<string>('');
+  const [selectedServiceUsa, setSelectedServiceUsa] = useState<string>('');
+  const [selectedServiceOther, setSelectedServiceOther] = useState<string>('');
   const [selectedCountry, setSelectedCountry] = useState<string>('');
-  const [offers, setOffers] = useState<Offer[]>([]);
+  const [offersUsa, setOffersUsa] = useState<Offer[]>([]);
+  const [offersOther, setOffersOther] = useState<Offer[]>([]);
   const [offerError, setOfferError] = useState('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [searching, setSearching] = useState(false);
-  const [purchasing, setPurchasing] = useState<string | null>(null);
+  const [purchasingUsa, setPurchasingUsa] = useState<string | null>(null);
+  const [purchasingOther, setPurchasingOther] = useState<string | null>(null);
   const [activeNumber, setActiveNumber] = useState<any | null>(null);
   const [smsLogs, setSmsLogs] = useState<any[]>([]);
   const [polling, setPolling] = useState(false);
   const [cancelingActiveNumber, setCancelingActiveNumber] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState<number>(0);
   const [usaCountryId, setUsaCountryId] = useState<string>('');
-  const [servicesWithPrices, setServicesWithPrices] = useState<any[]>([]);
+  const [usaServicesWithPrices, setUsaServicesWithPrices] = useState<any[]>([]);
+  const [otherServicesWithPrices, setOtherServicesWithPrices] = useState<any[]>([]);
 
   // Restore active number and SMS logs from localStorage on mount
   useEffect(() => {
@@ -120,7 +124,32 @@ export default function BuyNumbersPage() {
       const usa = (ctrys ?? []).find((c: any) => c.code?.toUpperCase() === 'US' || c.name?.toUpperCase() === 'USA');
       if (usa) {
         setUsaCountryId(usa.id);
-        setSelectedCountry(usa.id);
+        // Fetch USA services
+        const { data: usaServices } = await supabase
+          .from('provider_services')
+          .select(`
+            service_id,
+            our_price,
+            services(id, name, slug)
+          `)
+          .eq('country_id', usa.id)
+          .eq('active', true);
+
+        if (usaServices) {
+          const servicesMap = new Map<string, any>();
+          usaServices.forEach((ps: any) => {
+            if (ps.services && !servicesMap.has(ps.service_id)) {
+              servicesMap.set(ps.service_id, {
+                id: ps.services.id,
+                name: ps.services.name,
+                slug: ps.services.slug,
+                price: Number(ps.our_price),
+              });
+            }
+          });
+          const svcs = Array.from(servicesMap.values()).sort((a, b) => a.price - b.price);
+          setUsaServicesWithPrices(svcs);
+        }
       }
       
       setLoading(false);
@@ -128,13 +157,11 @@ export default function BuyNumbersPage() {
   }, []);
 
   const searchOffers = useCallback(async (serviceId?: string, countryId?: string) => {
-    const service = serviceId || selectedService;
-    const country = countryId || selectedCountry;
+    const service = serviceId;
+    const country = countryId;
     
     if (!service || !country) return;
     setSearching(true);
-    setOffers([]);
-    setOfferError('');
 
     const { data: providerServices, error } = await supabase
       .from('provider_services')
@@ -161,9 +188,15 @@ export default function BuyNumbersPage() {
       stock: ps.stock,
       provider_service_id: ps.id,
     }));
-    setOffers(mapped);
+
+    // Set offers based on which country
+    if (country === usaCountryId) {
+      setOffersUsa(mapped);
+    } else {
+      setOffersOther(mapped);
+    }
     setSearching(false);
-  }, [selectedService, selectedCountry]);
+  }, [usaCountryId]);
 
   // Fetch services with prices for a country
   const fetchServicesWithPrices = useCallback(async (countryId: string) => {
@@ -178,7 +211,6 @@ export default function BuyNumbersPage() {
       .eq('active', true);
 
     if (!error && data) {
-      // Group by service and get the first (cheapest) price
       const servicesMap = new Map<string, any>();
       data.forEach((ps: any) => {
         if (ps.services && !servicesMap.has(ps.service_id)) {
@@ -191,24 +223,32 @@ export default function BuyNumbersPage() {
         }
       });
       const svcs = Array.from(servicesMap.values()).sort((a, b) => a.price - b.price);
-      setServicesWithPrices(svcs);
+      setOtherServicesWithPrices(svcs);
     }
   }, []);
 
-  const handlePurchase = async (offer: Offer) => {
+  const handlePurchase = async (offer: Offer, isUsa: boolean = true) => {
     if (!user) return;
     if (!profile || profile.wallet_balance < offer.our_price) {
       toast.error('Insufficient wallet balance. Please fund your wallet first.');
       return;
     }
 
-    setPurchasing(offer.provider_service_id);
+    if (isUsa) {
+      setPurchasingUsa(offer.provider_service_id);
+    } else {
+      setPurchasingOther(offer.provider_service_id);
+    }
+
     try {
+      const countryId = isUsa ? usaCountryId : selectedCountry;
+      const serviceId = isUsa ? selectedServiceUsa : selectedServiceOther;
+
       const { data, error } = await supabase.functions.invoke('purchase-number', {
         body: {
           provider_service_id: offer.provider_service_id,
-          service_id: selectedService,
-          country_id: selectedCountry,
+          service_id: serviceId,
+          country_id: countryId,
           cost: offer.our_price,
         },
       });
@@ -230,29 +270,44 @@ export default function BuyNumbersPage() {
       setActiveNumber(data.number);
       localStorage.setItem('activeNumber', JSON.stringify(data.number));
       await refreshProfile();
-      setOffers([]);
-      setSelectedService('');
+      setSelectedServiceUsa('');
+      setSelectedServiceOther('');
       setSelectedCountry('');
+      setOffersUsa([]);
+      setOffersOther([]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to purchase number');
     } finally {
-      setPurchasing(null);
+      if (isUsa) {
+        setPurchasingUsa(null);
+      } else {
+        setPurchasingOther(null);
+      }
     }
   };
 
-  // Auto-search when service and country are selected
+  // Auto-search for USA when service is selected
   useEffect(() => {
-    if (selectedService && selectedCountry) {
-      searchOffers(selectedService, selectedCountry);
+    if (selectedServiceUsa && usaCountryId) {
+      searchOffers(selectedServiceUsa, usaCountryId);
     }
-  }, [selectedService, selectedCountry, searchOffers]);
+  }, [selectedServiceUsa, usaCountryId, searchOffers]);
 
-  // Fetch services with prices when country changes
+  // Auto-search for Other Countries when service and country are selected
   useEffect(() => {
-    if (selectedCountry) {
-      fetchServicesWithPrices(selectedCountry);
+    if (selectedServiceOther && selectedCountry && selectedCountry !== usaCountryId) {
+      searchOffers(selectedServiceOther, selectedCountry);
     }
-  }, [selectedCountry, fetchServicesWithPrices]);
+  }, [selectedServiceOther, selectedCountry, usaCountryId, searchOffers]);
+
+  // Fetch services with prices when other country changes
+  useEffect(() => {
+    if (selectedCountry && selectedCountry !== usaCountryId) {
+      fetchServicesWithPrices(selectedCountry);
+      setSelectedServiceOther('');
+      setOffersOther([]);
+    }
+  }, [selectedCountry, usaCountryId, fetchServicesWithPrices]);
 
   // Poll for SMS on active number
   useEffect(() => {
@@ -491,12 +546,12 @@ export default function BuyNumbersPage() {
                         {loading ? (
                           <Skeleton className="h-10 w-full" />
                         ) : (
-                          <Select value={selectedService} onValueChange={setSelectedService}>
+                          <Select value={selectedServiceUsa} onValueChange={setSelectedServiceUsa}>
                             <SelectTrigger>
                               <SelectValue placeholder="Choose a service" />
                             </SelectTrigger>
                             <SelectContent>
-                              {servicesWithPrices.map((s) => (
+                              {usaServicesWithPrices.map((s) => (
                                 <SelectItem key={s.id} value={s.id}>
                                   {s.name} • {formatCurrency(s.price)}
                                 </SelectItem>
@@ -508,14 +563,14 @@ export default function BuyNumbersPage() {
                     </Card>
 
                     {/* Offers for USA */}
-                    {selectedService && selectedCountry === usaCountryId && offers.length > 0 && (
+                    {selectedServiceUsa && offersUsa.length > 0 && (
                       <Card>
                         <CardHeader>
                           <CardTitle className="text-lg">Available Providers</CardTitle>
                         </CardHeader>
                         <CardContent>
                           <div className="space-y-3">
-                            {offers.map((offer) => (
+                            {offersUsa.map((offer) => (
                               <div key={offer.provider_service_id} className="flex items-center justify-between rounded-lg border p-4">
                                 <div>
                                   <div className="font-medium">{offer.provider_name}</div>
@@ -531,10 +586,10 @@ export default function BuyNumbersPage() {
                                   </div>
                                   <Button
                                     size="sm"
-                                    onClick={() => handlePurchase(offer)}
-                                    disabled={purchasing === offer.provider_service_id}
+                                    onClick={() => handlePurchase(offer, true)}
+                                    disabled={purchasingUsa === offer.provider_service_id}
                                   >
-                                    {purchasing === offer.provider_service_id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Buy'}
+                                    {purchasingUsa === offer.provider_service_id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Buy'}
                                   </Button>
                                 </div>
                               </div>
@@ -544,7 +599,7 @@ export default function BuyNumbersPage() {
                       </Card>
                     )}
 
-                    {selectedService && selectedCountry === usaCountryId && !searching && offers.length === 0 && (
+                    {selectedServiceUsa && !searching && offersUsa.length === 0 && (
                       <div className="rounded-lg border border-dashed py-8 text-center">
                         <Smartphone className="mx-auto h-10 w-10 text-muted-foreground" />
                         <p className="mt-3 text-sm text-muted-foreground">{offerError || 'No available providers for this service.'}</p>
@@ -572,11 +627,9 @@ export default function BuyNumbersPage() {
                             <div>
                               <Label className="mb-2 block text-sm">Country</Label>
                               <Select 
-                                value={selectedCountry !== usaCountryId ? selectedCountry : ''}
+                                value={selectedCountry}
                                 onValueChange={(value) => {
                                   setSelectedCountry(value);
-                                  setSelectedService('');
-                                  setOffers([]);
                                 }}
                               >
                                 <SelectTrigger>
@@ -594,17 +647,17 @@ export default function BuyNumbersPage() {
 
                             <div>
                               <Label className="mb-2 block text-sm">Service</Label>
-                              {selectedCountry === usaCountryId || !selectedCountry ? (
+                              {!selectedCountry ? (
                                 <div className="rounded-lg border border-dashed bg-muted/30 py-8 text-center">
                                   <p className="text-sm text-muted-foreground">Select a country first</p>
                                 </div>
                               ) : (
-                                <Select value={selectedService} onValueChange={setSelectedService}>
+                                <Select value={selectedServiceOther} onValueChange={setSelectedServiceOther}>
                                   <SelectTrigger>
                                     <SelectValue placeholder="Choose a service" />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    {servicesWithPrices.map((s) => (
+                                    {otherServicesWithPrices.map((s) => (
                                       <SelectItem key={s.id} value={s.id}>
                                         {s.name} • {formatCurrency(s.price)}
                                       </SelectItem>
@@ -619,14 +672,14 @@ export default function BuyNumbersPage() {
                     </Card>
 
                     {/* Offers for Other Countries */}
-                    {selectedService && selectedCountry !== usaCountryId && offers.length > 0 && (
+                    {selectedServiceOther && offersOther.length > 0 && (
                       <Card>
                         <CardHeader>
                           <CardTitle className="text-lg">Available Providers</CardTitle>
                         </CardHeader>
                         <CardContent>
                           <div className="space-y-3">
-                            {offers.map((offer) => (
+                            {offersOther.map((offer) => (
                               <div key={offer.provider_service_id} className="flex items-center justify-between rounded-lg border p-4">
                                 <div>
                                   <div className="font-medium">{offer.provider_name}</div>
@@ -642,10 +695,10 @@ export default function BuyNumbersPage() {
                                   </div>
                                   <Button
                                     size="sm"
-                                    onClick={() => handlePurchase(offer)}
-                                    disabled={purchasing === offer.provider_service_id}
+                                    onClick={() => handlePurchase(offer, false)}
+                                    disabled={purchasingOther === offer.provider_service_id}
                                   >
-                                    {purchasing === offer.provider_service_id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Buy'}
+                                    {purchasingOther === offer.provider_service_id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Buy'}
                                   </Button>
                                 </div>
                               </div>
@@ -655,7 +708,7 @@ export default function BuyNumbersPage() {
                       </Card>
                     )}
 
-                    {selectedService && selectedCountry !== usaCountryId && !searching && offers.length === 0 && (
+                    {selectedServiceOther && !searching && offersOther.length === 0 && (
                       <div className="rounded-lg border border-dashed py-8 text-center">
                         <Smartphone className="mx-auto h-10 w-10 text-muted-foreground" />
                         <p className="mt-3 text-sm text-muted-foreground">{offerError || 'No active provider is configured for this service and country.'}</p>
