@@ -58,17 +58,6 @@ export default function AdminServicesPage() {
       return;
     }
 
-    const invalidMaxPrice = validCountryPrices.find((country) => {
-      const ourPrice = Number(countryPrices[country.id] || 0);
-      const maxPrice = Number(countryMaxPrices[country.id] ?? ourPrice ?? 0);
-      return maxPrice > 0 && maxPrice < ourPrice;
-    });
-
-    if (invalidMaxPrice) {
-      toast.error(`Max price must be at least the selling price for ${countries.find((country) => country.id === invalidMaxPrice.id)?.name ?? 'this country'}`);
-      return;
-    }
-
     let serviceId = editing?.id;
     if (editing) {
       const { provider_id, active, ...serviceForm } = form;
@@ -192,7 +181,7 @@ export default function AdminServicesPage() {
                       <div className="rounded-lg border p-3">
                         <div className="mb-3 flex items-center justify-between">
                           <h3 className="text-sm font-medium">Country pricing</h3>
-                          <span className="text-xs text-muted-foreground">Set your selling price and Tiger max price per country</span>
+                          <span className="text-xs text-muted-foreground">Set your selling price and Tiger max price independently</span>
                         </div>
                         <div className="space-y-3">
                           {countries.filter((country) => country.active).map((country) => (
