@@ -111,119 +111,133 @@ export default function BuyNumbersPage() {
     return () => clearInterval(timer);
   }, [activeNumber?.id]);
 
+  // Initialize services and countries, find USA country
   useEffect(() => {
     (async () => {
-      const [{ data: svcs }, { data: ctrys }] = await Promise.all([
-        supabase.from('services').select('*').eq('active', true).order('sort_order'),
-        supabase.from('countries').select('*').eq('active', true).order('sort_order'),
-      ]);
-      setServices(svcs ?? []);
-      setCountries(ctrys ?? []);
-      
-      // Find USA country
-      const usa = (ctrys ?? []).find((c: any) => c.code?.toUpperCase() === 'US' || c.name?.toUpperCase() === 'USA');
-      if (usa) {
-        setUsaCountryId(usa.id);
-        // Fetch USA services
-        const { data: usaServices } = await supabase
-          .from('provider_services')
-          .select(`
-            service_id,
-            our_price,
-            services(id, name, slug)
-          `)
-          .eq('country_id', usa.id)
-          .eq('active', true);
+      try {
+        const [{ data: svcs }, { data: ctrys }] = await Promise.all([
+          supabase.from('services').select('*').eq('active', true).order('sort_order'),
+          supabase.from('countries').select('*').eq('active', true).order('sort_order'),
+        ]);
+        setServices(svcs ?? []);
+        setCountries(ctrys ?? []);
+        
+        // Find USA country and load its services
+        const usa = (ctrys ?? []).find((c: any) => c.code?.toUpperCase() === 'US' || c.name?.toUpperCase() === 'USA');
+        if (usa) {
+          setUsaCountryId(usa.id);
+          
+          // Fetch USA services
+          const { data: usaServices } = await supabase
+            .from('provider_services')
+            .select(`
+              service_id,
+              our_price,
+              services(id, name, slug)
+            `)
+            .eq('country_id', usa.id)
+            .eq('active', true);
 
-        if (usaServices) {
-          const servicesMap = new Map<string, any>();
-          usaServices.forEach((ps: any) => {
-            if (ps.services && !servicesMap.has(ps.service_id)) {
-              servicesMap.set(ps.service_id, {
-                id: ps.services.id,
-                name: ps.services.name,
-                slug: ps.services.slug,
-                price: Number(ps.our_price),
-              });
-            }
-          });
-          const svcs = Array.from(servicesMap.values()).sort((a, b) => a.price - b.price);
-          setUsaServicesWithPrices(svcs);
+          if (usaServices) {
+            const servicesMap = new Map<string, any>();
+            usaServices.forEach((ps: any) => {
+              if (ps.services && !servicesMap.has(ps.service_id)) {
+                servicesMap.set(ps.service_id, {
+                  id: ps.services.id,
+                  name: ps.services.name,
+                  slug: ps.services.slug,
+                  price: Number(ps.our_price),
+                });
+              }
+            });
+            const sorted = Array.from(servicesMap.values()).sort((a, b) => a.price - b.price);
+            setUsaServicesWithPrices(sorted);
+          }
         }
+        
+        setLoading(false);
+      } catch (err) {
+        console.error('Failed to load initial data:', err);
+        setLoading(false);
       }
-      
-      setLoading(false);
     })();
   }, []);
 
-  const searchOffers = useCallback(async (serviceId?: string, countryId?: string) => {
-    const service = serviceId;
-    const country = countryId;
-    
-    if (!service || !country) return;
+  const searchOffers = useCallback(async (serviceId: string, countryId: string) => {
+    if (!serviceId || !countryId) return;
     setSearching(true);
+    setOfferError('');
 
-    const { data: providerServices, error } = await supabase
-      .from('provider_services')
-      .select(`
-        id, our_price, stock, active, provider_id,
-        providers!inner(name, active)
-      `)
-      .eq('service_id', service)
-      .eq('country_id', country)
-      .eq('active', true)
-      .eq('providers.active', true)
-      .order('our_price', { ascending: true });
+    try {
+      const { data: providerServices, error } = await supabase
+        .from('provider_services')
+        .select(`
+          id, our_price, stock, active, provider_id,
+          providers!inner(name, active)
+        `)
+        .eq('service_id', serviceId)
+        .eq('country_id', countryId)
+        .eq('active', true)
+        .eq('providers.active', true)
+        .order('our_price', { ascending: true });
 
-    if (error) {
-      setOfferError(error.message);
+      if (error) {
+        setOfferError(error.message);
+        setSearching(false);
+        return;
+      }
+
+      const mapped: Offer[] = (providerServices ?? []).map((ps: any) => ({
+        provider_id: ps.provider_id,
+        provider_name: ps.providers.name,
+        our_price: Number(ps.our_price),
+        stock: ps.stock,
+        provider_service_id: ps.id,
+      }));
+
+      // Set offers based on which country
+      if (countryId === usaCountryId) {
+        setOffersUsa(mapped);
+      } else {
+        setOffersOther(mapped);
+      }
+    } catch (err: any) {
+      setOfferError(err.message);
+    } finally {
       setSearching(false);
-      return;
     }
-
-    const mapped: Offer[] = (providerServices ?? []).map((ps: any) => ({
-      provider_id: ps.provider_id,
-      provider_name: ps.providers.name,
-      our_price: Number(ps.our_price),
-      stock: ps.stock,
-      provider_service_id: ps.id,
-    }));
-
-    // Set offers based on which country
-    if (country === usaCountryId) {
-      setOffersUsa(mapped);
-    } else {
-      setOffersOther(mapped);
-    }
-    setSearching(false);
   }, [usaCountryId]);
 
   // Fetch services with prices for a country
   const fetchServicesWithPrices = useCallback(async (countryId: string) => {
-    const { data, error } = await supabase
-      .from('provider_services')
-      .select(`
-        service_id,
-        our_price,
-        services(id, name, slug)
-      `)
-      .eq('country_id', countryId)
-      .eq('active', true);
+    try {
+      const { data, error } = await supabase
+        .from('provider_services')
+        .select(`
+          service_id,
+          our_price,
+          services(id, name, slug)
+        `)
+        .eq('country_id', countryId)
+        .eq('active', true);
 
-    if (!error && data) {
-      const servicesMap = new Map<string, any>();
-      data.forEach((ps: any) => {
-        if (ps.services && !servicesMap.has(ps.service_id)) {
-          servicesMap.set(ps.service_id, {
-            id: ps.services.id,
-            name: ps.services.name,
-            slug: ps.services.slug,
-            price: Number(ps.our_price),
-          });
-        }
-      });
-      const svcs = Array.from(servicesMap.values()).sort((a, b) => a.price - b.price);
-      setOtherServicesWithPrices(svcs);
+      if (!error && data) {
+        const servicesMap = new Map<string, any>();
+        data.forEach((ps: any) => {
+          if (ps.services && !servicesMap.has(ps.service_id)) {
+            servicesMap.set(ps.service_id, {
+              id: ps.services.id,
+              name: ps.services.name,
+              slug: ps.services.slug,
+              price: Number(ps.our_price),
+            });
+          }
+        });
+        const svcs = Array.from(servicesMap.values()).sort((a, b) => a.price - b.price);
+        setOtherServicesWithPrices(svcs);
+      }
+    } catch (err: any) {
+      console.error('Failed to fetch services:', err);
     }
   }, []);
 
@@ -545,7 +559,7 @@ export default function BuyNumbersPage() {
                       <CardContent>
                         {loading ? (
                           <Skeleton className="h-10 w-full" />
-                        ) : (
+                        ) : usaServicesWithPrices.length > 0 ? (
                           <Select value={selectedServiceUsa} onValueChange={setSelectedServiceUsa}>
                             <SelectTrigger>
                               <SelectValue placeholder="Choose a service" />
@@ -558,6 +572,10 @@ export default function BuyNumbersPage() {
                               ))}
                             </SelectContent>
                           </Select>
+                        ) : (
+                          <div className="rounded-lg border border-dashed bg-muted/30 py-8 text-center">
+                            <p className="text-sm text-muted-foreground">No USA services available</p>
+                          </div>
                         )}
                       </CardContent>
                     </Card>
@@ -651,7 +669,7 @@ export default function BuyNumbersPage() {
                                 <div className="rounded-lg border border-dashed bg-muted/30 py-8 text-center">
                                   <p className="text-sm text-muted-foreground">Select a country first</p>
                                 </div>
-                              ) : (
+                              ) : otherServicesWithPrices.length > 0 ? (
                                 <Select value={selectedServiceOther} onValueChange={setSelectedServiceOther}>
                                   <SelectTrigger>
                                     <SelectValue placeholder="Choose a service" />
@@ -664,6 +682,10 @@ export default function BuyNumbersPage() {
                                     ))}
                                   </SelectContent>
                                 </Select>
+                              ) : (
+                                <div className="rounded-lg border border-dashed bg-muted/30 py-8 text-center">
+                                  <p className="text-sm text-muted-foreground">No services available for this country</p>
+                                </div>
                               )}
                             </div>
                           </>
